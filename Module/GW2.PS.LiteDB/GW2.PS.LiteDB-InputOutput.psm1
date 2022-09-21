@@ -57,14 +57,41 @@ Function ConvertTo-GW2DBDocument {
     }
 }
 
-Function Add-GW2DBItem {
+Function ConvertFrom-GW2DBDocument {
+<#
+.SYNOPSIS
+Removes JSON obfuscation of BSON Document properties and builds array into standard PSCustomObject
+#>
+    param($Document)
+
+    $result = @{}
+    ForEach ($Property in $Document) {
+        $value = $Property.Value
+        $ConversionAttempts = 0
+        While (($value -match "^(([""\{])|(\[[^&]))") -and ($ConversionAttempts -lt 5) ) {
+            try {
+                $ConversionAttempts++
+                Write-Debug "attempting [$ConversionAttempts] to convert [ $value ]"
+                $Value = $Value | ConvertFrom-Json -ErrorAction Stop
+            } catch {
+                Write-Debug "Failed to convert [ $value ] after [ $ConversionAttempts ] attempts"
+                $ConversionAttempts++
+            }
+        }
+        $result.($Property.key) = $value
+    }
+    [PSCustomObject]$result
+
+}
+
+Function Add-GW2DBEntry {
     [cmdletbinding()]
     param(
         [parameter(ValueFromPipeline)]
         [PSCustomObject]$InputObject,
         [parameter(Mandatory)]
         [string]$CollectionName,
-        [int]$Count = 4
+        [switch]$PassThru
     )
     Begin {
         If (Test-GW2DBCollection -CollectionName $CollectionName) {
@@ -86,16 +113,50 @@ Function Add-GW2DBItem {
         }
         Write-Debug "$($Collection.name): $($doc['id']) => $($doc['name'])"
         $null = $Collection.Insert($doc) #($BSONMapper.ToDocument($InputObject)))
+        If ($PassThru) { ConvertFrom-GW2DBDocument -Document $doc }
     }
 }
 
-Function Get-GW2DBItem {
+Function Get-GW2DBItemByQuery {
     [cmdletbinding()]
     param(
         [parameter(ValueFromPipeline,ValueFromPipelineByPropertyName)]
-        [string[]]$Id,
+        [string]$QueryString,
         [parameter(Mandatory)]
-        [string]$CollectionName
+        [string]$CollectionName,
+        [switch]$SingleResult
+    )
+
+    Begin {
+        #Ensure that if they past an endpoint name, we ensure its a proper collection name before we get the collection
+        $CollectionName = Get-GW2DBCollectionName -EndPointName $CollectionName
+        If (Test-GW2DBCollection -CollectionName $CollectionName) {
+            $Collection = Get-GW2DBCollection -CollectionName $CollectionName
+        }
+        else {
+            $Collection = New-GW2DBCollection -CollectionName $CollectionName
+        }
+    }
+
+    Process {
+        If ($SingleResult) {
+            $Collection.FindOne($QueryString)
+        } else {
+            $Collection.Find($QueryString)
+        }
+    }
+}
+
+Function Get-GW2DBEntry {
+    [cmdletbinding(DefaultParameterSetName="OnlyID")]
+    param(
+        [parameter(ValueFromPipeline,ValueFromPipelineByPropertyName,ParameterSetName="OnlyID")]
+        [string[]]$Id,
+        [parameter(ValueFromPipeline,ValueFromPipelineByPropertyName,ParameterSetName="PropertyHashTable",Mandatory)]
+        [hashtable]$PropertyValues,
+        [parameter(Mandatory)]
+        [string]$CollectionName,
+        [switch]$SkipOnlineLookup
 
         ### TODO:  Need to deal with extra ear order on behalf
     )
@@ -106,22 +167,79 @@ Function Get-GW2DBItem {
         else {
             $Collection = New-GW2DBCollection -CollectionName $CollectionName
         }
+        $MissingIds=@()
     }
     Process {
-        ForEach ($ItemId in ($Id -split ',')) {
-            $result = @{}
-            # While FindOne() will retrieve the first matching entry, the content are all esaped
-            #  as JSoN formats.  Therefore, if the value starts with ", {, or [, it still needs to
-            #  be converted from JSON
-            ForEach ($prop in ($Collection.FindOne("`$.Id = '$ItemId'"))) {
-                $value = $prop.Value
-                While ($value -match "^(([""\{])|(\[[^&]))" ) {
-                    $Value = $Value | ConvertFrom-Json
+        switch ($PSCmdlet.ParameterSetName) {
+            "OnlyID" {
+                Write-Debug "Database query of $CollectionName for IDs = $ID"
+                If ($ID -match ","){
+                    $Entries = ($id -split ',')
+                    $FormatEntries = $Entries | %{ If ($_ -match "^'[^']*'$") { $_ } else { "'$_'" } }
+                    $QueryArray = "[ {0} ]" -f ($FormatEntries -join ',')
+                    Write-Information "Querying $COllectionName for an array $QueryArray"
+                    $Documents = $Collection.Find("`$.Id in $QueryArray")
+                    # TODO: Something in here is causing a result of "True" which is getting sent to API as an unknown ID which obviously fails
+                    $Results = $Documents | ForEach-Object { ConvertFrom-GW2DBDocument -Document $_ }
+                    $MissingIds += $FormatEntries -notin ($Results.Id | ForEach-Object { "'$_'" } )
+                    $Results
+                } else {
+                    $Document = $Collection.FindOne("`$.Id = '$Id'")
+                    If ($Document) {
+                        ConvertFrom-GW2DBDocument -Document $Document
+                    } else {
+                        $MissingIds += $Id
+                    }
                 }
-                $result.($Prop.key) = $value
+                <#
+                ForEach ($EntryId in ($Id -split ',')) {
+                    # While FindOne() will retrieve the first matching entry, the content are all esaped
+                    #  as JSoN formats.  Therefore, if the value starts with ", {, or [, it still needs to
+                    #  be converted from JSON
+                }
+                #>
             }
-            [PSCustomObject]$result
+            default {
+                $QueryElements=[System.Collections.ArrayList]@()
+                ForEach ($Property in $PropertyValues.Keys) {
+                    $QueryElements.Add(("`$.{0} = '{1}'" -f $Property,$PropertyValues.$Property))
+                }
+                $FullQuery = $QueryElements -join " and "
+                Write-Debug "Attempting to query $CollectionName for $FullQuery"
+                $Document = $Collection.FindOne($FullQuery)
+                ConvertFrom-GW2DBDocument -Document $Document
+            }
         }
+    }
+    End {
+        If ($MissingIds -and (-not $SkipOnlineLookup)) {
+            Write-Debug "Couldn't find $($MissingIds.count) IDs in Database; looking up online"
+            $APIValue = Get-GW2DBAPIValue -CollectionName $CollectionName
+            $MissingEntries = Get-GW2APIValue -APIValue $APIValue -APIParams @{ 'ids' = ($MissingIds -join ',') } -UseCache:$false -UseDB:$false
+            $MissingEntries | Add-GW2DBEntry -CollectionName $CollectionName -PassThru
+        }
+    }
+}
+
+Function Get-GW2DBCollectionName {
+    [cmdletbinding()]
+    param(
+        [parameter(ValueFromPipeline,ValueFromPipelineByPropertyName)]
+        [string]$EndPointName)
+
+    Process {
+        $EndpointName -replace "[\\/]","_"
+    }
+}
+
+Function Get-GW2DBAPIValue {
+    [cmdletbinding()]
+    param(
+        [parameter(ValueFromPipeline,ValueFromPipelineByPropertyName)]
+        [string]$CollectionName)
+
+    Process {
+        $CollectionName -replace "_","/"
     }
 }
 
@@ -133,13 +251,24 @@ Function Get-GW2DBValue {
         [hashtable]$APIParams
     )
 
+    Begin {
+        $CollectionName = $APIValue | Get-GW2DBCollectionName
+        Connect-GW2LiteDB
+    }
+
     Process {
-        If ($APIParams.count -gt 0) {
-            $CollectionName = $APIValue -replace "[\\/]","_"
-            Get-GW2DBItem -CollectionName $CollectionName -APIParams $APIParams 
+        If ($APIParams.Ids) {
+            Get-GW2DBEntry -CollectionName $CollectionName -Id $APIParams.Ids 
+        } elseIf ($APIParams.count -gt 0) {
+            Get-GW2DBEntry -CollectionName $CollectionName -PropertyValues $APIParams 
         } else {
-            Get-GW2APIValue -APIValue $APIValue -SecureAPIKey $SecureAPIKey -APIParams $APIParams -UseCache:$false
+            $WebResults = Get-GW2APIValue -APIValue $APIValue -SecureAPIKey $SecureAPIKey -APIParams $APIParams -UseCache:$false -UseDB:$false
+            $WebResults
         }
+    }
+
+    ENd {
+        Disconnect-GW2LiteDB
     }
 
 }
