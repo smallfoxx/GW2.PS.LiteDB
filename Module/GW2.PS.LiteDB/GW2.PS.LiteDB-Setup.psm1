@@ -1,6 +1,6 @@
 Function Install-GW2LiteDB {
-param([version]$MinimumVersion='5.0.12',
-    [string]$Source='NuGet')
+    param([version]$MinimumVersion = '5.0.12',
+        [string]$Source = 'NuGet')
 
     $PackageName = 'LiteDB'
     If (-not (Get-Package -Name $PackageName)) {
@@ -12,7 +12,8 @@ param([version]$MinimumVersion='5.0.12',
         try {
             Write-Debug "Installing $PackageName"
             Install-Package -name $PackageName -MinimumVersion $MinimumVersion -Source 'NuGet' -Force -ErrorAction Stop
-        } catch {
+        }
+        catch {
             Write-Warning "Installation FAILED!  Attempting to install 'LiteDB' in elevated admin mode."
             $PSExe = Get-ChildItem $PSHome\p*.exe | Select-Object -First 1 -ExpandProperty FullName
             Start-Process -Verb RunAs -FilePath $PSExe -ArgumentList @("-Command", 
@@ -31,7 +32,7 @@ Function Import-GW2LiteDBDriver {
     If ( -Not ([System.Management.Automation.PSTypeName]'LiteDB.LiteDatabase').Type ) {
         $Package = Get-Package -Name $PackageName
         $PackageDllPaths = (Get-ChildItem -Filter '*.dll' -Recurse (Split-Path $Package.Source)).FullName
-        $standardAssemblyFullPath = $PackageDllPaths | Where-Object {$_ -Like "*standard*"} | Select-Object -Last 1
+        $standardAssemblyFullPath = $PackageDllPaths | Where-Object { $_ -Like "*standard*" } | Select-Object -Last 1
     
         Add-Type -Path $standardAssemblyFullPath -ErrorAction 'SilentlyContinue'
     }
@@ -41,14 +42,17 @@ Function Import-GW2LiteDBDriver {
 Function Connect-GW2LiteDB {
     param(
         [string]$DBName = (Get-GW2ConfigValue -Section 'LiteDB' -Name 'DBName'),
-        [string]$DBPath = (Get-GW2ConfigValue -Section 'LiteDB' -Name 'Path')
+        [string]$DBPath = (Get-GW2ConfigValue -Section 'LiteDB' -Name 'Path'),
+        [switch]$PassThru
     )
 
     If (-not (Get-Package 'LiteDB' -ErrorAction SilentlyContinue)) {
         Write-Warning "Database driver not installed! Call Install-GW2LiteDB before connecting to DB."
-    } else {
+    }
+    elseif (-not (Test-GW2LiteDB)) {
         Import-GW2LiteDBDriver
         $script:GW2PSDatabase = [LiteDB.LiteDatabase]::New("$DBPath\$DBName.db")
+        If ($PassThru) { Test-GW2LiteDB }
     }
 
 }
@@ -56,13 +60,33 @@ Function Connect-GW2LiteDB {
 Function Disconnect-GW2LiteDB {
     param()
 
-    $script:GW2PSDatabase.dispose()
+    if (Test-GW2LiteDB) {
+        $script:GW2PSDatabase.dispose()
+    }
+}
+
+Function Test-GW2LiteDB {
+
+    If ($script:GW2PSDatabase) {
+        $active = $true
+        try {
+            $null = $script:GW2PSDatabase.GetCollectionNames()
+        }
+        catch {
+            $active = $false
+        }
+    }
+    else {
+        $active = $false
+    }
+
+    $active
 }
 
 Function Get-GW2LiteDB {
     param()
 
-    Write-Output $script:GW2PSDatabase
+    $script:GW2PSDatabase
 
 }
 
