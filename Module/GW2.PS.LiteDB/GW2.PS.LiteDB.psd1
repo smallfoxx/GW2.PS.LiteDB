@@ -75,6 +75,7 @@
     NestedModules = @(
       'GW2.PS.LiteDB-Setup.psm1',
       'GW2.PS.LiteDB-InputOutput.psm1',
+      'GW2.PS.LiteDB-Synchronize.psm1',
       'GW2.PS.LiteDB-ConfigManagement.psm1'
     )
     
