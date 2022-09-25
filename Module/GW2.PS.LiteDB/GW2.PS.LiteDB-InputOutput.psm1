@@ -2,11 +2,14 @@ Function New-GW2DBCollection {
     param(
         [parameter(Mandatory)]
         [string]$CollectionName,
-        [string]$DefaultIndex = 'Id'
+        [string[]]$DefaultIndex = @('Id')
     )
 
+    If ($CollectionName -eq 'items') { $DefaultIndex += 'default_skin' }
     $Collection = Get-GW2DBCollection -CollectionName $CollectionName
-    $Collection.EnsureIndex($DefaultIndex)
+    ForEach ($Index in $DefaultIndex) {
+        $Collection.EnsureIndex($Index)
+    }
     Write-Output $Collection 
 }
 
@@ -95,24 +98,31 @@ Function ConvertFrom-GW2DBDocument {
 .SYNOPSIS
 Removes JSON obfuscation of BSON Document properties and builds array into standard PSCustomObject
 #>
-    param($Document)
+    param(
+        [parameter(ValueFromPipeline,Mandatory)]
+        $Document)
 
+Process {
     $result = [PSCustomObject]@{
         "Document" = $Document
     }
 
     ForEach ($Property in $Document) {
         Invoke-Expression @"
-`$result | Add-Member ScriptProperty $($Property.Key) { 
+`$result | Add-Member ScriptProperty '$($Property.Key)' { 
     `$Property = `$this.Document | Where-Object { `$_.Key -eq '$($Property.Key)'  }
     If (`$Property){
         Format-GW2DBDocumentValue -Value `$Property.Value
     }
-}
-"@
+} -Force
+"@ 
+#Invoke-Expression @"
+#`$result | Add-Member NoteProperty '$($Property.Key)' ($($Property.Value)) -Force
+#"@
     }
     [PSCustomObject]$result
 
+}
 }
 
 Function Add-GW2DBEntry {
@@ -122,6 +132,7 @@ Function Add-GW2DBEntry {
         [PSCustomObject]$InputObject,
         [parameter(Mandatory)]
         [string]$CollectionName,
+        [switch]$CheckExist,
         [switch]$PassThru
     )
     Begin {
@@ -143,7 +154,18 @@ Function Add-GW2DBEntry {
             }
         }
         Write-Debug "$($Collection.name): $($doc['id']) => $($doc['name'])"
-        $null = $Collection.Insert($doc) #($BSONMapper.ToDocument($InputObject)))
+        If ($CheckExist) {
+            $Found = $Collection.FindOne("`$.Id = '$($doc['id'])'")
+            If ($Found) {
+                $doc['_id']=$Found['_id']
+                $UpsertResult = $Collection.Update($doc) #($BSONMapper.ToDocument($InputObject)))
+            } else {
+                $UpsertResult = $Collection.Insert($doc) #($BSONMapper.ToDocument($InputObject)))
+            }
+        } else {
+            $UpsertResult = $Collection.Insert($doc) #($BSONMapper.ToDocument($InputObject)))
+        }
+        Write-Debug "Upsert result: $UpsertResult"
         If ($PassThru) { ConvertFrom-GW2DBDocument -Document $doc }
     }
 }
@@ -169,10 +191,12 @@ Function Get-GW2DBEntryByQuery {
 
     Process {
         If ($SingleResult) {
-            $Collection.FindOne($QueryString)
+            $Documents = $Collection.FindOne($QueryString)
         } else {
-            $Collection.Find($QueryString)
+            $Documents = $Collection.Find($QueryString)
         }
+        $Results = $Documents | ForEach-Object { ConvertFrom-GW2DBDocument -Document $_ }
+        return $results
     }
 }
 
@@ -221,7 +245,6 @@ Function Get-GW2DBEntry {
         [switch]$SkipOnlineLookup,
         [switch]$DkipDocumentConversion
 
-        ### TODO:  Need to deal with extra ear order on behalf
     )
     Begin {
         #Ensure that if they past an endpoint name, we ensure its a proper collection name before we get the collection
@@ -264,7 +287,7 @@ Function Get-GW2DBEntry {
                             $Documents
                         } else {
                             $Results = $Documents | ForEach-Object { ConvertFrom-GW2DBDocument -Document $_ }
-                            $IdsNotInResults = Find-GW2DBMissingEntries -Reference ($Results.Id) -Difference $Id #-Comparison ($Results.Ids)
+                            $IdsNotInResults = Find-GW2DBMissingEntries -Reference ($Results.Id) -Difference $Id 
 
                             $MissingIds += @($IdsNotInResults)
                             $Results
