@@ -92,7 +92,7 @@ Function Test-GW2DBMinimum {
         If ($Response -match "^y") {
             Write-Host "Importing core endpoint data..." -ForegroundColor Cyan
             Import-GW2EndpointData -Core -Debug
-            If ($PassThru) { Test-GW2DBMinimum }
+            If ($PassThru) { $True }
         } else {
             $ValidCollections
         }

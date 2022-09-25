@@ -12,7 +12,7 @@
     # RootModule = ''
     
     # Version number of this module.
-    ModuleVersion = '0.2.1.1'
+    ModuleVersion = '0.2.1.2'
     
     # Supported PSEditions
     # CompatiblePSEditions = @()
@@ -110,10 +110,10 @@
             Tags = @("GuildWars2","GW2","SMFX","SmFoxx","Gaming","LiteDB")
     
             # A URL to the license for this module.
-            LicenseUri = 'https://github.com/smallfoxx/GW2.PS.LIteDB/LICENSE'
+            LicenseUri = 'https://github.com/smallfoxx/GW2.PS.LiteDB/LICENSE'
     
             # A URL to the main website for this project.
-            ProjectUri = 'https://github.com/smallfoxx/GW2.PS.LIteDB'
+            ProjectUri = 'https://github.com/smallfoxx/GW2.PS.LiteDB'
     
             # A URL to an icon representing this module.
             # IconUri = ''
