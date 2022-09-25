@@ -54,7 +54,7 @@
     RequiredModules = @(
       @{
         'ModuleName' = 'GW2.PS.API'
-        'ModuleVersion' = '0.1.999.1'
+        'ModuleVersion' = '0.2.1.1'
       }
     )
     
