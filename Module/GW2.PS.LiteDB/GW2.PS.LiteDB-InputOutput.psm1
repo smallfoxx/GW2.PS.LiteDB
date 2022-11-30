@@ -5,7 +5,7 @@ Function New-GW2DBCollection {
         [string[]]$DefaultIndex = @('Id')
     )
 
-    If ($CollectionName -eq 'items') { $DefaultIndex += 'default_skin' }
+    If ($CollectionName -eq 'items') { $DefaultIndex += @('default_skin','name') }
     $Collection = Get-GW2DBCollection -CollectionName $CollectionName
     ForEach ($Index in $DefaultIndex) {
         $Collection.EnsureIndex($Index)
@@ -143,6 +143,7 @@ Function Add-GW2DBEntry {
         }
         $Collection = Get-GW2DBCollection -CollectionName $CollectionName
         $BSONMapper = Get-GW2DBMapper
+        $Documents = [System.Collections.ArrayList]@()
     }
     Process {
         #$doc = [LiteDB.BsonDocument]::New()
@@ -150,7 +151,7 @@ Function Add-GW2DBEntry {
         ForEach ($prop in ($InputObject | Get-Member -MemberType NoteProperty )) { #| select -first $count)) {
             If (-not ([string]::IsNullOrEmpty( $InputObject.($prop.Name)))) { #.length -gt 0) {
                 Write-Debug "$($Collection.name): $($prop.name) => '$($InputObject.($prop.Name))' [$($InputObject.($prop.Name).length)]"
-                $doc[$prop.name] = $InputObject.($prop.Name) | ConvertTo-Json -Depth 10
+                $doc[$prop.name] = $InputObject.($prop.Name) | ConvertTo-Json -Depth 10  # $BSONMapper.ToDocument(
             }
         }
         Write-Debug "$($Collection.name): $($doc['id']) => $($doc['name'])"
@@ -160,13 +161,21 @@ Function Add-GW2DBEntry {
                 $doc['_id']=$Found['_id']
                 $UpsertResult = $Collection.Update($doc) #($BSONMapper.ToDocument($InputObject)))
             } else {
-                $UpsertResult = $Collection.Insert($doc) #($BSONMapper.ToDocument($InputObject)))
+                $Documents.Add($doc)
+                #$UpsertResult = $Collection.Insert($doc) #($BSONMapper.ToDocument($InputObject)))
             }
         } else {
-            $UpsertResult = $Collection.Insert($doc) #($BSONMapper.ToDocument($InputObject)))
+            $Documents.Add($doc)
+            #$UpsertResult = $Collection.Insert($doc) #($BSONMapper.ToDocument($InputObject)))
         }
         Write-Debug "Upsert result: $UpsertResult"
         If ($PassThru) { ConvertFrom-GW2DBDocument -Document $doc }
+    }
+    End {
+        If ($Documents.count -gt 0) {
+            $UpsertResult = $Collection.InsertBulk($Documents, $Documents.Count)
+            Write-Debug "Upsert result: $UpsertResult"
+        }
     }
 }
 
@@ -177,10 +186,14 @@ Function Get-GW2DBEntryByQuery {
         [string]$QueryString,
         [parameter(Mandatory)]
         [string]$CollectionName,
-        [switch]$SingleResult
+        [switch]$SingleResult,
+        [parameter(ValueFromRemainingArguments)]
+        $RemaingArgs
     )
 
     Begin {
+        $Connected = Connect-GW2LiteDB -PassThru
+
         #Ensure that if they past an endpoint name, we ensure its a proper collection name before we get the collection
         $CollectionName = Get-GW2DBCollectionName -EndPointName $CollectionName
         If (-not (Test-GW2DBCollection -CollectionName $CollectionName)) {
@@ -197,6 +210,10 @@ Function Get-GW2DBEntryByQuery {
         }
         $Results = $Documents | ForEach-Object { ConvertFrom-GW2DBDocument -Document $_ }
         return $results
+    }
+
+    End {
+        If ($Connected) { Disconnect-GW2LiteDB }
     }
 }
 

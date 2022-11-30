@@ -33,7 +33,7 @@ Function Import-GW2EndpointData {
             'CoreContent' {
                 $EndPoints = @("skins","items") | ForEach-Object { Get-GW2APIEndpoint -EPName $_ -Detail }
             }
-            'SpecificContent' {
+            'SpecificEndpoints' {
                 $EndPoints = $Endpoint -split ',' | ForEach-Object { Get-GW2APIEndpoint -EPName $_ -Detail }
             }
             default {

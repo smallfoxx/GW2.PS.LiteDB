@@ -54,7 +54,7 @@
     RequiredModules = @(
       @{
         'ModuleName' = 'GW2.PS.API'
-        'ModuleVersion' = '0.2.1.1'
+        'ModuleVersion' = '0.2.1.2334'
       }
     )
     
@@ -75,6 +75,7 @@
     NestedModules = @(
       'GW2.PS.LiteDB-Setup.psm1',
       'GW2.PS.LiteDB-InputOutput.psm1',
+      'GW2.PS.LiteDB-Searching',
       'GW2.PS.LiteDB-Synchronize.psm1',
       'GW2.PS.LiteDB-ConfigManagement.psm1'
     )
