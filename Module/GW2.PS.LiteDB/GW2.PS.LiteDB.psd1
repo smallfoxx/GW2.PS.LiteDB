@@ -12,7 +12,7 @@
     # RootModule = ''
     
     # Version number of this module.
-    ModuleVersion = '0.2.1.2'
+    ModuleVersion = '0.2.1.2334'
     
     # Supported PSEditions
     # CompatiblePSEditions = @()
@@ -54,7 +54,7 @@
     RequiredModules = @(
       @{
         'ModuleName' = 'GW2.PS.API'
-        'ModuleVersion' = '0.2.1.2334'
+        'ModuleVersion' = '0.2.1.1'
       }
     )
     
